@@ -25,6 +25,7 @@ from .serializers import (
     ChiTietAddSerializer,
     ThanhToanSerializer
 )
+from .services import calculate_total
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,39 @@ class ChiTietHoaDonView(APIView):
 
         return Response({'success': True, 'message': 'Đã xóa món khỏi hóa đơn.', 'data': HoaDonSerializer(hd).data})
 
+    @transaction.atomic
+    def patch(self, request, ma_hd, item_id):
+        hd = get_object_or_404(HoaDon.objects.select_for_update(), pk=ma_hd)
+        if hd.trang_thai != HoaDon.TrangThai.CHO_PHA_CHE:
+            return Response({'success': False, 'message': 'Không thể sửa món trong hóa đơn đã chốt.'}, status=400)
+
+        ct = get_object_or_404(ChiTietHoaDon, pk=item_id, ma_hd=hd)
+        
+        # We can reuse ChiTietAddSerializer since it has so_luong and ghi_chu, but ma_mon shouldn't be updated.
+        # Actually, let's just get the fields manually.
+        so_luong = request.data.get('so_luong')
+        ghi_chu = request.data.get('ghi_chu')
+        
+        if so_luong is not None:
+            try:
+                so_luong = int(so_luong)
+                if so_luong < 1:
+                    return Response({'success': False, 'message': 'Số lượng phải lớn hơn 0.'}, status=400)
+                ct.so_luong = so_luong
+            except ValueError:
+                return Response({'success': False, 'message': 'Số lượng không hợp lệ.'}, status=400)
+                
+        if ghi_chu is not None:
+            ct.ghi_chu = str(ghi_chu)
+            
+        ct.save()
+        
+        # Cập nhật tổng tiền
+        hd.tong_tien = sum(item.thanh_tien for item in hd.chi_tiet.all())
+        hd.save(update_fields=['tong_tien'])
+
+        return Response({'success': True, 'message': 'Đã cập nhật món trong hóa đơn.', 'data': HoaDonSerializer(hd).data})
+
 
 # ---------------------------------------------------------------------------
 # Thanh toán (Checkout)
@@ -248,23 +282,7 @@ class ThanhToanView(APIView):
         if hd.sdt_khach and hd.sdt_khach.hang_tv != KhachHang.HangThanhVien.DONG:
             is_vip = True
 
-        if subtotal >= 500000 and is_vip and khuyen_mai:
-            discount_percent = 20
-        elif subtotal >= 500000 and khuyen_mai:
-            discount_percent = 15
-        elif subtotal >= 500000:
-            discount_percent = 10
-        elif is_vip:
-            discount_percent = 5
-        else:
-            discount_percent = 0
-
-        # Nếu bản thân voucher lớn hơn mức giảm giá Decision Table -> ưu tiên dùng voucher
-        # VD: Voucher 30%, điều kiện trên chỉ áp tối đa 20% thì dùng 30% hợp lý hơn. 
-        # Nhưng theo đề bài "Áp dụng bảng quyết định", tôi sẽ tuân thủ tuyệt đối bảng.
-        # Ở đây discount_percent đè lên voucher percent. Hoặc có thể là max. Ta lấy theo bảng quyết định của đề.
-
-        final_total = subtotal * Decimal(100 - discount_percent) / Decimal(100)
+        final_total, discount_percent = calculate_total(subtotal, is_vip, khuyen_mai)
         
         # Cập nhật hóa đơn
         hd.tong_tien = final_total
@@ -279,6 +297,7 @@ class ThanhToanView(APIView):
         ban.save(update_fields=['trang_thai'])
 
         # 3. Tích điểm và thăng hạng thành viên
+        earned_points = 0
         if hd.sdt_khach:
             kh = KhachHang.objects.select_for_update().get(pk=hd.sdt_khach_id)
             earned_points = int(final_total // 10000)

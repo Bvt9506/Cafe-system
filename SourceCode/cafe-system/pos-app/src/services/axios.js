@@ -23,9 +23,11 @@ api.interceptors.response.use(response => {
     return response;
 }, error => {
     if (error.response && error.response.status === 401) {
-        // Token hết hạn hoặc không hợp lệ
-        localStorage.removeItem('token');
-        window.location.href = '/login'; // Force redirect to login
+        // Chỉ redirect nếu KHÔNG đang ở trang login (tránh vòng lặp vô hạn)
+        if (!window.location.pathname.includes('/login')) {
+            localStorage.removeItem('token');
+            window.location.href = '/login'; // Force redirect to login
+        }
     }
     return Promise.reject(error);
 });

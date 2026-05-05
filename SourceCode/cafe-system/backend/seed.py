@@ -22,8 +22,14 @@ def hash_password(password):
 
 def seed_data():
     print("Xóa dữ liệu cũ...")
-    TaiKhoan.objects.all().delete()
+    # Xóa theo thứ tự đúng (child trước, parent sau) để tránh lỗi PROTECT FK
+    from apps.orders.models import HoaDon, ChiTietHoaDon
+    from apps.customers.models import KhachHang
+    ChiTietHoaDon.objects.all().delete()
+    HoaDon.objects.all().delete()
+    KhachHang.objects.all().delete()
     NhanVien.objects.all().delete()
+    TaiKhoan.objects.all().delete()
     Ban.objects.all().delete()
     ThucDon.objects.all().delete()
     TonKho.objects.all().delete()

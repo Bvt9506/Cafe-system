@@ -14,7 +14,6 @@
         <ul class="legend">
           <li><span class="color-box empty"></span> Trống (0)</li>
           <li><span class="color-box occupied"></span> Có khách (1)</li>
-          <li><span class="color-box cleaning"></span> Đang dọn (2)</li>
         </ul>
         <div class="table-actions">
           <button class="btn-info" @click="transferModal = true">Chuyển bàn</button>
@@ -40,6 +39,44 @@
         </div>
       </div>
     </div>
+
+    <!-- TABLE ACTION MODAL -->
+    <div v-if="showTableModal" class="modal-overlay" @click.self="showTableModal = false">
+      <div class="modal-content">
+        <h3>Bàn {{ selectedTable?.ma_ban }} - {{ selectedTable?.ten_khu_vuc }}</h3>
+        
+        <div class="action-group">
+          <h4>Thao tác Hóa đơn</h4>
+          <button v-if="selectedTable?.trang_thai === 0" class="btn-primary w-100" @click="handleCreateOrder(selectedTable)">
+            Tạo hóa đơn mới
+          </button>
+          <button v-else-if="selectedTable?.trang_thai === 1" class="btn-primary w-100" @click="handleViewOrder(selectedTable)">
+            Xem hóa đơn
+          </button>
+          <p v-else-if="selectedTable?.trang_thai === 2" class="warning-text">
+            Bàn đang dọn, không thể tạo hóa đơn.
+          </p>
+        </div>
+
+        <div class="action-group">
+          <h4>Cập nhật trạng thái</h4>
+          <div class="status-buttons">
+            <button 
+              :class="['btn-status', selectedTable?.trang_thai === 0 ? 'active-empty' : '']" 
+              @click="changeTableStatus(selectedTable, 0)">Trống
+            </button>
+            <button 
+              :class="['btn-status', selectedTable?.trang_thai === 1 ? 'active-occupied' : '']" 
+              @click="changeTableStatus(selectedTable, 1)">Có khách
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="showTableModal = false">Đóng</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -59,6 +96,9 @@ const loading = ref(true);
 
 const transferModal = ref(false);
 const mergeModal = ref(false);
+
+const showTableModal = ref(false);
+const selectedTable = ref(null);
 
 const fetchTables = async () => {
   loading.value = true;
@@ -86,37 +126,49 @@ const getStatusClass = (status) => {
   return '';
 };
 
-const handleTableClick = async (ban) => {
-  if (ban.trang_thai === 2) {
-    alert("Bàn đang dọn, vui lòng chờ!");
-    return;
-  }
+const handleTableClick = (ban) => {
+  selectedTable.value = ban;
+  showTableModal.value = true;
+};
 
-  if (ban.trang_thai === 0) {
-    // Tạo hóa đơn mới
-    try {
-      const res = await api.post('/api/orders/', { ma_ban: ban.ma_ban });
-      if (res.data.success) {
-        orderStore.setOrder(ban.ma_ban, res.data.data.ma_hd, []);
-        router.push('/order');
-      }
-    } catch (err) {
-      alert(err.response?.data?.message || "Lỗi tạo hóa đơn");
+const handleCreateOrder = async (ban) => {
+  try {
+    const res = await api.post('/api/orders/', { ma_ban: ban.ma_ban });
+    if (res.data.success) {
+      orderStore.setOrder(ban.ma_ban, res.data.data.ma_hd, [], res.data.data.hang_khach_hang);
+      router.push('/order');
     }
-  } else if (ban.trang_thai === 1) {
-    // Tìm hóa đơn đang mở của bàn này
-    try {
-      const res = await api.get(`/api/orders/?ban=${ban.ma_ban}&trang_thai=Chờ pha chế`);
-      if (res.data.success && res.data.data.length > 0) {
-        const order = res.data.data[0];
-        orderStore.setOrder(ban.ma_ban, order.ma_hd, order.chi_tiet);
-        router.push('/order');
-      } else {
-        alert("Không tìm thấy hóa đơn mở cho bàn này!");
-      }
-    } catch (err) {
-      console.error(err);
+  } catch (err) {
+    alert(err.response?.data?.message || "Lỗi tạo hóa đơn");
+  }
+};
+
+const handleViewOrder = async (ban) => {
+  try {
+    const res = await api.get(`/api/orders/?ban=${ban.ma_ban}&trang_thai=Chờ pha chế`);
+    if (res.data.success && res.data.data.length > 0) {
+      const order = res.data.data[0];
+      orderStore.setOrder(ban.ma_ban, order.ma_hd, order.chi_tiet, order.hang_khach_hang);
+      router.push('/order');
+    } else {
+      alert("Không tìm thấy hóa đơn mở cho bàn này!");
     }
+  } catch (err) {
+    console.error(err);
+  }
+};
+
+const changeTableStatus = async (ban, newStatus) => {
+  if (ban.trang_thai === newStatus) return;
+  try {
+    const res = await api.patch(`/api/tables/${ban.ma_ban}/status/`, { trang_thai: newStatus });
+    if (res.data.success) {
+      ban.trang_thai = newStatus;
+      showTableModal.value = false;
+      fetchTables();
+    }
+  } catch (err) {
+    alert(err.response?.data?.message || "Lỗi cập nhật trạng thái bàn");
   }
 };
 
@@ -230,4 +282,36 @@ const handleLogout = () => {
 .status-empty { background-color: #2ecc71; }
 .status-occupied { background-color: #e74c3c; }
 .status-cleaning { background-color: #f1c40f; color: #333; }
+
+/* MODAL STYLES */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+.modal-content {
+  background: white;
+  padding: 25px;
+  border-radius: 12px;
+  width: 400px;
+  max-width: 90%;
+}
+.modal-content h3 { margin-top: 0; margin-bottom: 20px; font-size: 22px; color: #2c3e50; }
+.action-group { margin-bottom: 25px; }
+.action-group h4 { margin-top: 0; margin-bottom: 10px; color: #7f8c8d; font-size: 14px; text-transform: uppercase; }
+.btn-primary { background-color: #3498db; color: white; border: none; padding: 12px; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold; }
+.w-100 { width: 100%; }
+.warning-text { color: #f39c12; font-style: italic; margin: 0; }
+.status-buttons { display: flex; gap: 10px; }
+.btn-status { flex: 1; padding: 10px; border: 1px solid #ddd; background: white; border-radius: 6px; cursor: pointer; font-weight: 500; transition: all 0.2s;}
+.btn-status:hover { background: #f9f9f9; }
+.active-empty { background-color: #2ecc71 !important; color: white; border-color: #2ecc71; }
+.active-occupied { background-color: #e74c3c !important; color: white; border-color: #e74c3c; }
+.active-cleaning { background-color: #f1c40f !important; color: #333; border-color: #f1c40f; }
+.modal-actions { display: flex; justify-content: flex-end; margin-top: 15px; }
+.btn-cancel { padding: 10px 20px; background: #ecf0f1; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; color: #7f8c8d; }
 </style>

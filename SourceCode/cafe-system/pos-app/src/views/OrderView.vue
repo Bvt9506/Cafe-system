@@ -26,7 +26,7 @@
             v-for="mon in filteredMenu" 
             :key="mon.ma_mon"
             class="menu-item"
-            @click="addItemToOrder(mon)"
+            @click="openItemModal(mon)"
           >
             <div class="item-img-placeholder">
               <span v-if="!mon.hinh_anh">☕</span>
@@ -47,11 +47,15 @@
           <div v-if="!orderStore.orderItems.length" class="empty-msg">Chưa có món nào.</div>
           <div v-for="item in orderStore.orderItems" :key="item.id" class="order-row">
             <div class="row-main">
-              <span class="row-name">{{ item.ten_mon }}</span>
+              <span class="row-name">
+                {{ item.ten_mon }}
+                <small v-if="item.ghi_chu" class="item-note"><br/>* {{ item.ghi_chu }}</small>
+              </span>
               <span class="row-qty">x{{ item.so_luong }}</span>
               <span class="row-price">{{ formatPrice(item.thanh_tien) }}đ</span>
             </div>
             <div class="row-actions">
+              <button class="btn-icon" @click="openEditModal(item)">✏️</button>
               <button class="btn-icon" @click="removeItem(item.id)">🗑️</button>
             </div>
           </div>
@@ -65,6 +69,33 @@
           <button class="btn-checkout" :disabled="!orderStore.orderItems.length" @click="goToCheckout">
             THANH TOÁN
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL CUSTOMIZE MÓN -->
+    <div v-if="showItemModal" class="modal-overlay" @click.self="showItemModal = false">
+      <div class="modal-content">
+        <h3>{{ selectedMon?.ten_mon }}</h3>
+        <p class="modal-price">{{ formatPrice(selectedMon?.don_gia) }}đ</p>
+        
+        <div class="form-group">
+          <label>Số lượng</label>
+          <div class="qty-control">
+            <button type="button" @click="decreaseQuantity">-</button>
+            <input type="number" v-model.number="itemQuantity" min="1" />
+            <button type="button" @click="increaseQuantity">+</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Ghi chú (Tùy chọn)</label>
+          <input type="text" v-model="itemNote" placeholder="VD: Ít đá, nhiều đường..." class="note-input" />
+        </div>
+
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="showItemModal = false">Hủy</button>
+          <button class="btn-confirm" @click="confirmAddItem">Thêm vào đơn ({{ formatPrice((selectedMon?.don_gia || 0) * itemQuantity) }}đ)</button>
         </div>
       </div>
     </div>
@@ -83,6 +114,13 @@ const orderStore = useOrderStore();
 const menu = ref([]);
 const categories = ref(['Tất cả']);
 const currentCategory = ref('Tất cả');
+
+// Variables for customization modal
+const showItemModal = ref(false);
+const selectedMon = ref(null);
+const itemQuantity = ref(1);
+const itemNote = ref('');
+const editingItemId = ref(null);
 
 const fetchMenu = async () => {
   try {
@@ -103,6 +141,7 @@ const refreshOrder = async () => {
     const res = await api.get(`/api/orders/${orderStore.currentOrderId}/`);
     if (res.data.success) {
       orderStore.orderItems = res.data.data.chi_tiet;
+      orderStore.currentCustomerTier = res.data.data.hang_khach_hang;
     }
   } catch (err) {
     console.error(err);
@@ -127,15 +166,52 @@ const subtotal = computed(() => {
   return orderStore.orderItems.reduce((acc, curr) => acc + parseFloat(curr.thanh_tien), 0);
 });
 
-const addItemToOrder = async (mon) => {
+const decreaseQuantity = () => {
+  if (itemQuantity.value > 1) itemQuantity.value--;
+};
+
+const increaseQuantity = () => {
+  itemQuantity.value++;
+};
+
+const openItemModal = (mon) => {
+  editingItemId.value = null;
+  selectedMon.value = mon;
+  itemQuantity.value = 1;
+  itemNote.value = '';
+  showItemModal.value = true;
+};
+
+const openEditModal = (item) => {
+  editingItemId.value = item.id;
+  selectedMon.value = {
+    ma_mon: item.ma_mon,
+    ten_mon: item.ten_mon,
+    don_gia: item.gia_ban
+  };
+  itemQuantity.value = item.so_luong;
+  itemNote.value = item.ghi_chu || '';
+  showItemModal.value = true;
+};
+
+const confirmAddItem = async () => {
   try {
-    await api.post(`/api/orders/${orderStore.currentOrderId}/items/`, {
-      ma_mon: mon.ma_mon,
-      so_luong: 1
-    });
+    if (editingItemId.value) {
+      await api.patch(`/api/orders/${orderStore.currentOrderId}/items/${editingItemId.value}/`, {
+        so_luong: itemQuantity.value,
+        ghi_chu: itemNote.value
+      });
+    } else {
+      await api.post(`/api/orders/${orderStore.currentOrderId}/items/`, {
+        ma_mon: selectedMon.value.ma_mon,
+        so_luong: itemQuantity.value,
+        ghi_chu: itemNote.value
+      });
+    }
     refreshOrder();
+    showItemModal.value = false;
   } catch (err) {
-    alert("Lỗi thêm món: " + (err.response?.data?.message || err.message));
+    alert("Lỗi thêm/sửa món: " + (err.response?.data?.message || err.message));
   }
 };
 
@@ -300,4 +376,34 @@ const formatPrice = (price) => {
   font-size: 18px;
 }
 .btn-checkout:disabled { background-color: #95a5a6; cursor: not-allowed; }
+
+/* MODAL STYLES */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+.modal-content {
+  background: white;
+  padding: 25px;
+  border-radius: 12px;
+  width: 400px;
+  max-width: 90%;
+}
+.modal-content h3 { margin-top: 0; margin-bottom: 5px; }
+.modal-price { color: #e67e22; font-weight: bold; margin-bottom: 20px; font-size: 18px;}
+.form-group { margin-bottom: 15px; }
+.form-group label { display: block; margin-bottom: 8px; font-weight: 500; }
+.qty-control { display: flex; align-items: center; }
+.qty-control button { width: 40px; height: 40px; font-size: 20px; background: #ecf0f1; border: none; cursor: pointer; border-radius: 4px;}
+.qty-control input { width: 60px; height: 40px; text-align: center; font-size: 16px; margin: 0 10px; border: 1px solid #ddd; border-radius: 4px;}
+.note-input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box;}
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 25px; }
+.btn-cancel { padding: 10px 15px; background: #ecf0f1; border: none; border-radius: 4px; cursor: pointer; }
+.btn-confirm { padding: 10px 15px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;}
+.item-note { color: #7f8c8d; font-size: 13px; font-style: italic; }
 </style>
