@@ -52,8 +52,8 @@
           <ul class="top-list">
             <li v-for="(item, index) in topItems" :key="index">
               <span class="rank">#{{ index + 1 }}</span>
-              <span class="name">{{ item.ten_mon }}</span>
-              <span class="qty">{{ item.total_qty }} ly</span>
+              <span class="name">{{ item.item_name }}</span>
+              <span class="qty">{{ item.quantity_sold }} ly</span>
             </li>
           </ul>
         </div>
@@ -101,8 +101,8 @@ const fetchDashboardData = async () => {
     const today = new Date().toISOString().split('T')[0];
     const resDaily = await api.get(`/api/reports/revenue/daily/?date=${today}`, { headers });
     if (resDaily.data.success) {
-      dailyRevenue.value = resDaily.data.data.doanh_thu || 0;
-      dailyOrders.value = resDaily.data.data.so_luong_hd || 0;
+      dailyRevenue.value = resDaily.data.data.total_revenue || 0;
+      dailyOrders.value = resDaily.data.data.invoice_count || 0;
     }
 
     // 2. Lấy cảnh báo kho
@@ -133,7 +133,7 @@ const fetchDashboardData = async () => {
             label: 'Doanh thu (VNĐ)',
             backgroundColor: '#3498db',
             borderColor: '#3498db',
-            data: last7.map(d => parseFloat(d.doanh_thu))
+            data: last7.map(d => parseFloat(d.revenue))
           }
         ]
       };

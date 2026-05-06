@@ -12,8 +12,8 @@
       <div class="sidebar">
         <h3>Ghi chú bàn</h3>
         <ul class="legend">
-          <li><span class="color-box empty"></span> Trống (0)</li>
-          <li><span class="color-box occupied"></span> Có khách (1)</li>
+          <li><span class="color-box empty"></span> Trống ({{ emptyTablesCount }})</li>
+          <li><span class="color-box occupied"></span> Có khách ({{ occupiedTablesCount }})</li>
         </ul>
         <div class="table-actions">
           <button class="btn-info" @click="transferModal = true">Chuyển bàn</button>
@@ -53,8 +53,8 @@
           <button v-else-if="selectedTable?.trang_thai === 1" class="btn-primary w-100" @click="handleViewOrder(selectedTable)">
             Xem hóa đơn
           </button>
-          <p v-else-if="selectedTable?.trang_thai === 2" class="warning-text">
-            Bàn đang dọn, không thể tạo hóa đơn.
+          <p v-else-if="selectedTable?.trang_thai === 2" class="warning-text" style="color: #e74c3c;">
+            Bàn đang có khách, không thể tạo hóa đơn.
           </p>
         </div>
 
@@ -81,7 +81,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import api from '../services/axios';
 import { useAuthStore } from '../stores/auth';
@@ -93,6 +93,9 @@ const orderStore = useOrderStore();
 
 const tables = ref([]);
 const loading = ref(true);
+
+const emptyTablesCount = computed(() => tables.value.filter(t => t.trang_thai === 0).length);
+const occupiedTablesCount = computed(() => tables.value.filter(t => t.trang_thai === 1 || t.trang_thai === 2).length);
 
 const transferModal = ref(false);
 const mergeModal = ref(false);
@@ -119,10 +122,9 @@ onMounted(() => {
 });
 
 const getStatusClass = (status) => {
-  // 0=Trống, 1=Có khách, 2=Đang dọn
+  // 0=Trống, 1=Có khách, 2=Đang dọn (now visually treated as Có khách)
   if (status === 0) return 'status-empty';
-  if (status === 1) return 'status-occupied';
-  if (status === 2) return 'status-cleaning';
+  if (status === 1 || status === 2) return 'status-occupied';
   return '';
 };
 

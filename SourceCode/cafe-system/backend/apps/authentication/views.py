@@ -49,14 +49,8 @@ def _make_tokens(tai_khoan: TaiKhoan) -> dict:
 
 
 def _verify_password(raw_password: str, hashed: str) -> bool:
-    """So sánh mật khẩu plain-text với bcrypt hash an toàn."""
-    try:
-        return bcrypt.checkpw(
-            raw_password.encode('utf-8'),
-            hashed.encode('utf-8')
-        )
-    except Exception:
-        return False
+    """So sánh mật khẩu (plain text do yêu cầu user)."""
+    return raw_password == hashed
 
 
 # ---------------------------------------------------------------------------
@@ -71,8 +65,7 @@ def hash_password(raw_password: str) -> str:
     Ví dụ:
         tai_khoan.mat_khau = hash_password('MatKhauMoi@123')
     """
-    salt = bcrypt.gensalt(rounds=12)
-    return bcrypt.hashpw(raw_password.encode('utf-8'), salt).decode('utf-8')
+    return raw_password
 
 
 # ---------------------------------------------------------------------------

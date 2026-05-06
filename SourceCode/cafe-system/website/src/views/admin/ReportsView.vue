@@ -71,7 +71,7 @@ const fetchData = async () => {
           label: 'Doanh thu (VNĐ)',
           backgroundColor: '#27ae60',
           borderColor: '#2ecc71',
-          data: data.map(d => parseFloat(d.doanh_thu)),
+          data: data.map(d => parseFloat(d.revenue)),
           tension: 0.3
         }]
       };
@@ -82,11 +82,11 @@ const fetchData = async () => {
     if (resBest.data.success) {
       const data = resBest.data.data.slice(0, 10);
       barChartData.value = {
-        labels: data.map(d => d.ten_mon),
+        labels: data.map(d => d.item_name),
         datasets: [{
           label: 'Số lượng bán',
           backgroundColor: '#e67e22',
-          data: data.map(d => d.total_qty)
+          data: data.map(d => d.quantity_sold)
         }]
       };
     }

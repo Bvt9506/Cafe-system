@@ -16,7 +16,7 @@ services:
     build: ./backend
     container_name: cafe_backend
     command: >
-      bash -c "python manage.py migrate --settings=config.settings_dev &&
+      bash -c "python manage.py migrate &&
                python seed.py &&
                gunicorn --bind 0.0.0.0:8000 config.wsgi:application"
     volumes:
@@ -28,7 +28,7 @@ services:
       - DB_NAME=cafe_management
       - DB_USER=root
       - DB_PASSWORD=rootpassword
-      - DJANGO_SETTINGS_MODULE=config.settings_dev
+      - DJANGO_SETTINGS_MODULE=config.settings
     depends_on:
       - db
 

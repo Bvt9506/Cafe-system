@@ -32,11 +32,39 @@ class NhanVienListCreateView(APIView):
         return Response({'success': True, 'count': queryset.count(), 'data': serializer.data})
 
     def post(self, request):
-        serializer = NhanVienSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response({'success': False, 'message': 'Dữ liệu không hợp lệ.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-        nv = serializer.save()
-        return Response({'success': True, 'message': 'Thêm nhân viên thành công.', 'data': NhanVienSerializer(nv).data}, status=status.HTTP_201_CREATED)
+        from apps.authentication.models import TaiKhoan
+        from django.db import transaction
+        
+        ten_dang_nhap = request.data.get('ten_dang_nhap')
+        mat_khau = request.data.get('mat_khau')
+        
+        try:
+            with transaction.atomic():
+                tk = None
+                if ten_dang_nhap and mat_khau:
+                    # Kiểm tra trùng tên đăng nhập
+                    if TaiKhoan.objects.filter(ten_dang_nhap=ten_dang_nhap).exists():
+                        return Response({'success': False, 'message': 'Tên đăng nhập đã tồn tại.'}, status=status.HTTP_400_BAD_REQUEST)
+                    tk = TaiKhoan.objects.create(
+                        ten_dang_nhap=ten_dang_nhap,
+                        mat_khau=mat_khau,
+                        ma_phan_quyen=TaiKhoan.PhanQuyen.NHAN_VIEN
+                    )
+                
+                # Loại bỏ ten_dang_nhap và mat_khau khỏi request.data trước khi cho vào serializer
+                data = request.data.copy()
+                data.pop('ten_dang_nhap', None)
+                data.pop('mat_khau', None)
+                
+                serializer = NhanVienSerializer(data=data)
+                if not serializer.is_valid():
+                    if tk: tk.delete()
+                    return Response({'success': False, 'message': 'Dữ liệu không hợp lệ.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+                
+                nv = serializer.save(ma_tk=tk)
+                return Response({'success': True, 'message': 'Thêm nhân viên thành công.', 'data': NhanVienSerializer(nv).data}, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'success': False, 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class NhanVienDetailView(APIView):
@@ -51,8 +79,39 @@ class NhanVienDetailView(APIView):
         return Response({'success': True, 'data': NhanVienSerializer(nv).data})
 
     def put(self, request, pk):
+        from apps.authentication.models import TaiKhoan
         nv = self.get_object(pk)
-        serializer = NhanVienSerializer(nv, data=request.data, partial=True)
+        
+        ten_dang_nhap = request.data.get('ten_dang_nhap')
+        mat_khau = request.data.get('mat_khau')
+        
+        # Xử lý cập nhật tài khoản
+        if ten_dang_nhap or mat_khau:
+            if nv.ma_tk:
+                if ten_dang_nhap and ten_dang_nhap != nv.ma_tk.ten_dang_nhap:
+                    if TaiKhoan.objects.filter(ten_dang_nhap=ten_dang_nhap).exists():
+                        return Response({'success': False, 'message': 'Tên đăng nhập đã tồn tại.'}, status=status.HTTP_400_BAD_REQUEST)
+                    nv.ma_tk.ten_dang_nhap = ten_dang_nhap
+                if mat_khau:
+                    nv.ma_tk.mat_khau = mat_khau
+                nv.ma_tk.save()
+            else:
+                if ten_dang_nhap and mat_khau:
+                    if TaiKhoan.objects.filter(ten_dang_nhap=ten_dang_nhap).exists():
+                        return Response({'success': False, 'message': 'Tên đăng nhập đã tồn tại.'}, status=status.HTTP_400_BAD_REQUEST)
+                    tk = TaiKhoan.objects.create(
+                        ten_dang_nhap=ten_dang_nhap,
+                        mat_khau=mat_khau,
+                        ma_phan_quyen=TaiKhoan.PhanQuyen.NHAN_VIEN
+                    )
+                    nv.ma_tk = tk
+                    nv.save()
+
+        data = request.data.copy()
+        data.pop('ten_dang_nhap', None)
+        data.pop('mat_khau', None)
+
+        serializer = NhanVienSerializer(nv, data=data, partial=True)
         if not serializer.is_valid():
             return Response({'success': False, 'message': 'Dữ liệu không hợp lệ.', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
         nv = serializer.save()

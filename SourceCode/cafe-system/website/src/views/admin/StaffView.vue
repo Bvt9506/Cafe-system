@@ -13,7 +13,8 @@
             <th>Họ Tên</th>
             <th>Số Điện Thoại</th>
             <th>Địa Chỉ</th>
-            <th>Tài Khoản Gắn Kèm</th>
+            <th>Tên Đăng Nhập</th>
+            <th>Mật Khẩu</th>
             <th>Thao tác</th>
           </tr>
         </thead>
@@ -23,14 +24,15 @@
             <td><strong>{{ nv.ho_ten }}</strong></td>
             <td>{{ nv.sdt }}</td>
             <td>{{ nv.dia_chi }}</td>
-            <td>{{ nv.ma_tk ? nv.ma_tk.ten_dang_nhap : 'Chưa có' }}</td>
+            <td>{{ nv.ten_dang_nhap ? nv.ten_dang_nhap : 'Chưa có' }}</td>
+            <td>{{ nv.mat_khau ? nv.mat_khau : '---' }}</td>
             <td>
               <button class="btn btn-primary" style="margin-right: 5px;" @click="openModal(nv)">Sửa</button>
               <button class="btn btn-danger" @click="deleteStaff(nv.ma_nv)">Xóa</button>
             </td>
           </tr>
           <tr v-if="staffList.length === 0">
-            <td colspan="6" style="text-align: center;">Chưa có dữ liệu.</td>
+            <td colspan="7" style="text-align: center;">Chưa có dữ liệu.</td>
           </tr>
         </tbody>
       </table>
@@ -54,7 +56,7 @@
           <input type="text" v-model="formData.dia_chi" class="form-control" />
         </div>
 
-        <div v-if="!isEdit" style="border-top: 1px solid #ddd; margin-top: 15px; padding-top: 15px;">
+        <div style="border-top: 1px solid #ddd; margin-top: 15px; padding-top: 15px;">
           <h4>Thông tin Đăng nhập (Cho POS)</h4>
           <div class="form-group">
             <label>Tên đăng nhập</label>
@@ -62,7 +64,7 @@
           </div>
           <div class="form-group">
             <label>Mật khẩu</label>
-            <input type="password" v-model="formData.mat_khau" class="form-control" />
+            <input type="text" v-model="formData.mat_khau" class="form-control" />
           </div>
         </div>
 
@@ -122,8 +124,8 @@ const openModal = (nv = null) => {
       ho_ten: nv.ho_ten,
       sdt: nv.sdt,
       dia_chi: nv.dia_chi,
-      ten_dang_nhap: '',
-      mat_khau: ''
+      ten_dang_nhap: nv.ten_dang_nhap || '',
+      mat_khau: nv.mat_khau || ''
     };
   } else {
     isEdit.value = false;

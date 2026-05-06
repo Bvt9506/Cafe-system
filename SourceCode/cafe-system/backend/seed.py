@@ -17,8 +17,7 @@ from apps.promotions.models import KhuyenMai
 import bcrypt
 
 def hash_password(password):
-    salt = bcrypt.gensalt(rounds=12)
-    return bcrypt.hashpw(password.encode('utf-8'), salt).decode('utf-8')
+    return password
 
 def seed_data():
     print("Xóa dữ liệu cũ...")

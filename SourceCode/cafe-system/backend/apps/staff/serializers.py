@@ -6,6 +6,9 @@ from .models import NhanVien, CaLam, ChamCong
 
 
 class NhanVienSerializer(serializers.ModelSerializer):
+    ten_dang_nhap = serializers.CharField(source='ma_tk.ten_dang_nhap', required=False, allow_blank=True)
+    mat_khau = serializers.CharField(source='ma_tk.mat_khau', required=False, allow_blank=True)
+
     class Meta:
         model = NhanVien
         fields = '__all__'
