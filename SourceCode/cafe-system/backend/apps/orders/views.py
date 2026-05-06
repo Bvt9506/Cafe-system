@@ -291,9 +291,9 @@ class ThanhToanView(APIView):
         hd.ma_km = khuyen_mai
         hd.save()
 
-        # Cập nhật Bàn -> Đang dọn
+        # Cập nhật Bàn → Trống
         ban = Ban.objects.select_for_update().get(pk=hd.ma_ban_id)
-        ban.trang_thai = Ban.TrangThai.DANG_DON
+        ban.trang_thai = Ban.TrangThai.TRONG
         ban.save(update_fields=['trang_thai'])
 
         # 3. Tích điểm và thăng hạng thành viên

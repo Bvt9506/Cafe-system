@@ -216,9 +216,9 @@ class ChuyenBanView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        if ban_nguon.trang_thai != Ban.TrangThai.CO_KHACH:
+        if ban_nguon.trang_thai not in [Ban.TrangThai.CO_KHACH, Ban.TrangThai.DANG_DON]:
             return Response(
-                {'success': False, 'message': f'Bàn nguồn {ma_tu} không đang có khách ({ban_nguon.get_trang_thai_display()}).', 'code': 'ban_nguon_not_occupied'},
+                {'success': False, 'message': f'Bàn nguồn {ma_tu} không đang có khách hoặc đang dọn ({ban_nguon.get_trang_thai_display()}).', 'code': 'ban_nguon_not_occupied'},
                 status=status.HTTP_409_CONFLICT
             )
 
@@ -232,14 +232,8 @@ class ChuyenBanView(APIView):
         hoa_don_qs = HoaDon.objects.filter(ma_ban=ban_nguon, trang_thai=HoaDon.TrangThai.CHO_PHA_CHE)
         so_hd = hoa_don_qs.count()
 
-        if so_hd == 0:
-            return Response(
-                {'success': False, 'message': f'Bàn nguồn {ma_tu} không có hóa đơn nào đang mở.', 'code': 'no_open_orders'},
-                status=status.HTTP_409_CONFLICT
-            )
-
         hoa_don_qs.update(ma_ban=ban_dich)
-        ban_nguon.trang_thai = Ban.TrangThai.DANG_DON
+        ban_nguon.trang_thai = Ban.TrangThai.TRONG
         ban_dich.trang_thai = Ban.TrangThai.CO_KHACH
         Ban.objects.bulk_update([ban_nguon, ban_dich], ['trang_thai', 'ngay_cap_nhat'])
 
@@ -265,10 +259,13 @@ class GopBanView(APIView):
     Body: { "ban_chinh": <int>, "ban_phu": [<int>, ...] }
 
     Logic (atomic):
-        1. Bàn chính phải đang Có khách.
-        2. Mỗi bàn phụ phải đang Có khách.
-        3. Chuyển HoaDon 'Chờ pha chế' từ các bàn phụ → bàn chính.
-        4. Các bàn phụ → Đang dọn. Bàn chính giữ nguyên.
+        1. ban_chinh phải Có khách.
+        2. ban_phu không được rỗng.
+        3. ban_chinh không được nằm trong ban_phu.
+        4. Mỗi bàn phụ phải Có khách.
+        5. Gộp chi tiết món từ bàn phụ vào hóa đơn bàn chính (cộng dồn nếu trùng).
+        6. Hủy hóa đơn phụ, đặt bàn phụ về Trống.
+        7. Cập nhật tong_tien của hóa đơn bàn chính.
     """
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsQuanLyOrNhanVien]
@@ -284,9 +281,23 @@ class GopBanView(APIView):
 
         ma_chinh = serializer.validated_data['ban_chinh']
         ma_phu_list = serializer.validated_data['ban_phu']
-        tat_ca_ma = [ma_chinh] + ma_phu_list
+
+        # 2. ban_phu không được rỗng
+        if not ma_phu_list:
+            return Response(
+                {'success': False, 'message': 'Danh sách bàn phụ không được rỗng.', 'code': 'ban_phu_empty'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 3. ban_chinh không được trùng với ban_phu
+        if ma_chinh in ma_phu_list:
+            return Response(
+                {'success': False, 'message': 'Bàn chính không được nằm trong danh sách bàn phụ.', 'code': 'ban_chinh_in_ban_phu'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         # Lock tất cả bàn trong 1 query
+        tat_ca_ma = [ma_chinh] + ma_phu_list
         ban_qs = Ban.objects.select_for_update().filter(pk__in=tat_ca_ma)
         ban_dict = {b.ma_ban: b for b in ban_qs}
 
@@ -300,12 +311,14 @@ class GopBanView(APIView):
         ban_chinh = ban_dict[ma_chinh]
         ban_phu_objs = [ban_dict[ma] for ma in ma_phu_list]
 
+        # 1. ban_chinh phải Có khách
         if ban_chinh.trang_thai != Ban.TrangThai.CO_KHACH:
             return Response(
                 {'success': False, 'message': f'Bàn chính {ma_chinh} phải đang có khách (hiện: {ban_chinh.get_trang_thai_display()}).', 'code': 'ban_chinh_not_occupied'},
                 status=status.HTTP_409_CONFLICT
             )
 
+        # 4. Mỗi bàn phụ phải Có khách
         ban_phu_sai = [b for b in ban_phu_objs if b.trang_thai != Ban.TrangThai.CO_KHACH]
         if ban_phu_sai:
             sai_info = [f"Bàn {b.ma_ban} ({b.get_trang_thai_display()})" for b in ban_phu_sai]
@@ -315,24 +328,63 @@ class GopBanView(APIView):
             )
 
         HoaDon = _get_hoa_don_model()
-        tong_hd = 0
+        from apps.orders.models import ChiTietHoaDon
+
+        # Lấy hóa đơn đang mở của bàn chính
+        hd_chinh = HoaDon.objects.filter(
+            ma_ban=ban_chinh, trang_thai=HoaDon.TrangThai.CHO_PHA_CHE
+        ).first()
+
+        if not hd_chinh:
+            return Response(
+                {'success': False, 'message': f'Bàn chính {ma_chinh} không có hóa đơn đang mở.', 'code': 'no_open_order_chinh'},
+                status=status.HTTP_409_CONFLICT
+            )
+
+        # 5. Gộp chi tiết từ bàn phụ vào bàn chính
         for ban_phu in ban_phu_objs:
-            so_hd = HoaDon.objects.filter(
+            hd_phu = HoaDon.objects.filter(
                 ma_ban=ban_phu, trang_thai=HoaDon.TrangThai.CHO_PHA_CHE
-            ).update(ma_ban=ban_chinh)
-            tong_hd += so_hd
+            ).first()
 
-        for b in ban_phu_objs:
-            b.trang_thai = Ban.TrangThai.DANG_DON
-        Ban.objects.bulk_update(ban_phu_objs, ['trang_thai', 'ngay_cap_nhat'])
+            if not hd_phu:
+                return Response(
+                    {'success': False, 'message': f'Bàn phụ {ban_phu.ma_ban} không có hóa đơn đang mở.', 'code': 'no_open_order_phu'},
+                    status=status.HTTP_409_CONFLICT
+                )
 
-        logger.info("Gộp bàn %s → bàn chính %s (%d HĐ) — bởi %s", ma_phu_list, ma_chinh, tong_hd, request.user.ten_dang_nhap)
+            # Gộp từng chi tiết món
+            for ct_phu in hd_phu.chi_tiet.select_related('ma_mon').all():
+                ct_chinh, created = ChiTietHoaDon.objects.get_or_create(
+                    ma_hd=hd_chinh,
+                    ma_mon=ct_phu.ma_mon,
+                    defaults={
+                        'so_luong': ct_phu.so_luong,
+                        'gia_ban': ct_phu.gia_ban,
+                        'ghi_chu': ct_phu.ghi_chu,
+                    }
+                )
+                if not created:
+                    ct_chinh.so_luong += ct_phu.so_luong
+                    if ct_phu.ghi_chu:
+                        ct_chinh.ghi_chu = (ct_chinh.ghi_chu + ' | ' + ct_phu.ghi_chu).strip(' | ')
+                    ct_chinh.save(update_fields=['so_luong', 'ghi_chu'])
+
+            # Hủy hóa đơn phụ
+            hd_phu.trang_thai = HoaDon.TrangThai.DA_HUY
+            hd_phu.save(update_fields=['trang_thai', 'ngay_cap_nhat'])
+
+            # Đặt bàn phụ về Trống
+            ban_phu.trang_thai = Ban.TrangThai.TRONG
+            ban_phu.save(update_fields=['trang_thai', 'ngay_cap_nhat'])
+
+        # 7. Cập nhật tổng tiền hóa đơn bàn chính
+        hd_chinh.tong_tien = sum(item.thanh_tien for item in hd_chinh.chi_tiet.all())
+        hd_chinh.save(update_fields=['tong_tien', 'ngay_cap_nhat'])
+
+        logger.info("Gộp bàn %s → bàn chính %s — bởi %s", ma_phu_list, ma_chinh, request.user.ten_dang_nhap)
         return Response({
             'success': True,
-            'message': f'Gộp {len(ma_phu_list)} bàn phụ vào Bàn {ma_chinh} thành công. Đã chuyển {tong_hd} hóa đơn.',
-            'data': {
-                'ban_chinh': BanSerializer(ban_chinh).data,
-                'ban_phu': BanSerializer(ban_phu_objs, many=True).data,
-                'tong_hoa_don_gop': tong_hd,
-            },
+            'message': f'Gộp {len(ma_phu_list)} bàn phụ vào Bàn {ma_chinh} thành công.',
         })
+

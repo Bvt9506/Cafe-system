@@ -33,11 +33,11 @@ class ThucDon(models.Model):
         default='',
         verbose_name='Mô tả'
     )
-    hinh_anh = models.ImageField(
-        upload_to='menu/',
+    hinh_anh = models.URLField(
+        max_length=500,
         blank=True,
         null=True,
-        verbose_name='Hình ảnh'
+        verbose_name='Hình ảnh (URL)'
     )
     trang_thai = models.IntegerField(
         choices=TrangThai.choices,

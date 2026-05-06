@@ -97,8 +97,9 @@ const fetchDashboardData = async () => {
   const headers = { Authorization: `Bearer ${adminStore.adminToken}` };
   
   try {
-    // 1. Lấy doanh thu hôm nay
-    const today = new Date().toISOString().split('T')[0];
+    // 1. Lấy doanh thu hôm nay (dùng giờ local, không dùng UTC)
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
     const resDaily = await api.get(`/api/reports/revenue/daily/?date=${today}`, { headers });
     if (resDaily.data.success) {
       dailyRevenue.value = resDaily.data.data.total_revenue || 0;

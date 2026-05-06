@@ -31,7 +31,7 @@ class Ban(models.Model):
         db_table = 'ban'
         verbose_name = 'Bàn'
         verbose_name_plural = 'Bàn'
-        ordering = ['ten_khu_vuc', 'ma_ban']
+        ordering = ['ma_ban']
 
     def __str__(self):
         return f"Bàn {self.ma_ban} - {self.ten_khu_vuc} [{self.get_trang_thai_display()}]"

@@ -16,13 +16,41 @@
           <li><span class="color-box occupied"></span> Có khách ({{ occupiedTablesCount }})</li>
         </ul>
         <div class="table-actions">
-          <button class="btn-info" @click="transferModal = true">Chuyển bàn</button>
-          <button class="btn-info" @click="mergeModal = true">Gộp bàn</button>
+          <button class="btn-info" :class="{ 'btn-active-mode': isTransferMode }" @click="toggleTransferMode">
+            {{ isTransferMode ? 'Hủy chuyển bàn' : 'Chuyển bàn' }}
+          </button>
+          <button class="btn-info" :class="{ 'btn-active-mode': isMergeMode }" @click="toggleMergeMode">
+            {{ isMergeMode ? 'Hủy gộp bàn' : 'Gộp bàn' }}
+          </button>
+        </div>
+
+        <!-- Merge mode info panel -->
+        <div v-if="isMergeMode" class="merge-panel">
+          <div v-if="mergeSource">
+            <p class="merge-label">Bàn chính: <strong>Bàn {{ mergeSource.ma_ban }}</strong></p>
+            <p v-if="mergeTargets.length > 0" class="merge-label">
+              Sẽ gộp vào Bàn {{ mergeSource.ma_ban }}:
+              <strong>{{ mergeTargets.map(b => 'Bàn ' + b.ma_ban).join(', ') }}</strong>
+            </p>
+            <button
+              v-if="mergeTargets.length > 0"
+              class="btn-confirm-merge"
+              @click="confirmMerge"
+            >Xác nhận gộp</button>
+          </div>
         </div>
       </div>
 
       <div class="map-area">
         <h2 style="margin-top: 0;">Sơ đồ Bàn</h2>
+
+        <div v-if="isTransferMode" class="transfer-banner">
+          {{ transferSource ? 'Chọn bàn muốn chuyển đến (bàn trống)' : 'Chọn bàn muốn chuyển đi (bàn đang có khách)' }}
+        </div>
+        <div v-if="isMergeMode" class="merge-banner">
+          {{ mergeSource ? `Chọn các bàn muốn gộp vào Bàn ${mergeSource.ma_ban}, sau đó nhấn Xác nhận gộp` : 'Chọn bàn chính (bàn giữ hóa đơn)' }}
+        </div>
+
         <div v-if="loading" class="loading">Đang tải sơ đồ...</div>
         
         <div v-else class="table-grid">
@@ -30,7 +58,12 @@
             v-for="ban in tables" 
             :key="ban.ma_ban"
             class="table-card"
-            :class="getStatusClass(ban.trang_thai)"
+            :class="[
+              getStatusClass(ban.trang_thai),
+              isTransferMode && transferSource?.ma_ban === ban.ma_ban ? 'table-selected-transfer' : '',
+              isMergeMode && mergeSource?.ma_ban === ban.ma_ban ? 'table-selected-transfer' : '',
+              isMergeMode && mergeTargets.some(b => b.ma_ban === ban.ma_ban) ? 'table-selected-merge-phu' : ''
+            ]"
             @click="handleTableClick(ban)"
           >
             <div class="table-name">Bàn {{ ban.ma_ban }}</div>
@@ -47,26 +80,23 @@
         
         <div class="action-group">
           <h4>Thao tác Hóa đơn</h4>
-          <button v-if="selectedTable?.trang_thai === 0" class="btn-primary w-100" @click="handleCreateOrder(selectedTable)">
+          <button v-if="Number(selectedTable?.trang_thai) === 0" class="btn-primary w-100" @click="handleCreateOrder(selectedTable)">
             Tạo hóa đơn mới
           </button>
-          <button v-else-if="selectedTable?.trang_thai === 1" class="btn-primary w-100" @click="handleViewOrder(selectedTable)">
+          <button v-else-if="Number(selectedTable?.trang_thai) === 1" class="btn-primary w-100" @click="handleViewOrder(selectedTable)">
             Xem hóa đơn
           </button>
-          <p v-else-if="selectedTable?.trang_thai === 2" class="warning-text" style="color: #e74c3c;">
-            Bàn đang có khách, không thể tạo hóa đơn.
-          </p>
         </div>
 
         <div class="action-group">
           <h4>Cập nhật trạng thái</h4>
           <div class="status-buttons">
             <button 
-              :class="['btn-status', selectedTable?.trang_thai === 0 ? 'active-empty' : '']" 
+              :class="['btn-status', Number(selectedTable?.trang_thai) === 0 ? 'active-empty' : '']" 
               @click="changeTableStatus(selectedTable, 0)">Trống
             </button>
             <button 
-              :class="['btn-status', selectedTable?.trang_thai === 1 ? 'active-occupied' : '']" 
+              :class="['btn-status', Number(selectedTable?.trang_thai) === 1 ? 'active-occupied' : '']" 
               @click="changeTableStatus(selectedTable, 1)">Có khách
             </button>
           </div>
@@ -94,11 +124,17 @@ const orderStore = useOrderStore();
 const tables = ref([]);
 const loading = ref(true);
 
-const emptyTablesCount = computed(() => tables.value.filter(t => t.trang_thai === 0).length);
-const occupiedTablesCount = computed(() => tables.value.filter(t => t.trang_thai === 1 || t.trang_thai === 2).length);
+const emptyTablesCount = computed(() => tables.value.filter(t => Number(t.trang_thai) === 0).length);
+const occupiedTablesCount = computed(() => tables.value.filter(t => Number(t.trang_thai) === 1).length);
 
-const transferModal = ref(false);
-const mergeModal = ref(false);
+// Transfer state
+const isTransferMode = ref(false);
+const transferSource = ref(null);
+
+// Merge state
+const isMergeMode = ref(false);
+const mergeSource = ref(null);
+const mergeTargets = ref([]);
 
 const showTableModal = ref(false);
 const selectedTable = ref(null);
@@ -122,13 +158,105 @@ onMounted(() => {
 });
 
 const getStatusClass = (status) => {
-  // 0=Trống, 1=Có khách, 2=Đang dọn (now visually treated as Có khách)
-  if (status === 0) return 'status-empty';
-  if (status === 1 || status === 2) return 'status-occupied';
-  return '';
+  const s = Number(status);
+  if (s === 0) return 'status-empty';
+  if (s === 1) return 'status-occupied';
+  return 'status-empty';
 };
 
-const handleTableClick = (ban) => {
+const toggleTransferMode = () => {
+  isTransferMode.value = !isTransferMode.value;
+  transferSource.value = null;
+  // Tắt merge mode nếu đang bật
+  if (isTransferMode.value) {
+    isMergeMode.value = false;
+    mergeSource.value = null;
+    mergeTargets.value = [];
+  }
+};
+
+const toggleMergeMode = () => {
+  isMergeMode.value = !isMergeMode.value;
+  mergeSource.value = null;
+  mergeTargets.value = [];
+  // Tắt transfer mode nếu đang bật
+  if (isMergeMode.value) {
+    isTransferMode.value = false;
+    transferSource.value = null;
+  }
+};
+
+const confirmMerge = async () => {
+  if (!mergeSource.value || mergeTargets.value.length === 0) return;
+  try {
+    const res = await api.post('/api/tables/merge/', {
+      ban_chinh: mergeSource.value.ma_ban,
+      ban_phu: mergeTargets.value.map(b => b.ma_ban)
+    });
+    if (res.data.success) {
+      alert('Gộp bàn thành công');
+      isMergeMode.value = false;
+      mergeSource.value = null;
+      mergeTargets.value = [];
+      fetchTables();
+    }
+  } catch (err) {
+    alert('Gộp bàn thất bại: ' + (err.response?.data?.message || err.message));
+  }
+};
+
+const handleTableClick = async (ban) => {
+  // --- Chế độ Chuyển bàn ---
+  if (isTransferMode.value) {
+    if (!transferSource.value) {
+      if (Number(ban.trang_thai) === 1) {
+        transferSource.value = ban;
+      }
+    } else {
+      if (Number(ban.trang_thai) === 0) {
+        try {
+          const res = await api.post('/api/tables/transfer/', {
+            tu_ban: transferSource.value.ma_ban,
+            den_ban: ban.ma_ban
+          });
+          if (res.data.success) {
+            alert('Chuyển bàn thành công');
+            isTransferMode.value = false;
+            transferSource.value = null;
+            fetchTables();
+          }
+        } catch (err) {
+          alert('Chuyển bàn thất bại: ' + (err.response?.data?.message || err.message));
+        }
+      }
+    }
+    return;
+  }
+
+  // --- Chế độ Gộp bàn ---
+  if (isMergeMode.value) {
+    if (Number(ban.trang_thai) !== 1) return; // Chỉ cho chọn bàn đỏ
+
+    if (!mergeSource.value) {
+      // Bước 2: Chọn bàn chính
+      mergeSource.value = ban;
+    } else if (ban.ma_ban === mergeSource.value.ma_ban) {
+      // Click lại bàn chính → bỏ chọn tất cả
+      mergeSource.value = null;
+      mergeTargets.value = [];
+    } else {
+      // Bước 3: Toggle bàn phụ
+      const idx = mergeTargets.value.findIndex(b => b.ma_ban === ban.ma_ban);
+      if (idx >= 0) {
+        mergeTargets.value.splice(idx, 1); // Bỏ chọn
+      } else {
+        mergeTargets.value.push(ban); // Thêm chọn
+      }
+    }
+    return;
+  }
+
+  // --- Bình thường: mở modal ---
   selectedTable.value = ban;
   showTableModal.value = true;
 };
@@ -265,6 +393,7 @@ const handleLogout = () => {
   align-items: center;
   cursor: pointer;
   color: white;
+  background-color: #2ecc71;
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   transition: transform 0.1s;
 }
@@ -316,4 +445,76 @@ const handleLogout = () => {
 .active-cleaning { background-color: #f1c40f !important; color: #333; border-color: #f1c40f; }
 .modal-actions { display: flex; justify-content: flex-end; margin-top: 15px; }
 .btn-cancel { padding: 10px 20px; background: #ecf0f1; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; color: #7f8c8d; }
+
+/* TRANSFER CSS */
+.transfer-banner {
+  background-color: #34495e;
+  color: white;
+  padding: 12px;
+  border-radius: 8px;
+  text-align: center;
+  font-weight: bold;
+  margin-bottom: 20px;
+  font-size: 16px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.table-selected-transfer {
+  border: 4px solid #f1c40f !important;
+  box-shadow: 0 0 15px rgba(241, 196, 15, 0.6) !important;
+  transform: scale(1.05);
+}
+
+.table-selected-merge-phu {
+  border: 4px solid #3498db !important;
+  box-shadow: 0 0 15px rgba(52, 152, 219, 0.6) !important;
+  transform: scale(1.05);
+}
+
+.merge-banner {
+  background-color: #8e44ad;
+  color: white;
+  padding: 12px;
+  border-radius: 8px;
+  text-align: center;
+  font-weight: bold;
+  margin-bottom: 20px;
+  font-size: 16px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.btn-active-mode {
+  background-color: #c0392b !important;
+}
+
+.merge-panel {
+  margin-top: 16px;
+  background: #f4f4f4;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 14px;
+}
+
+.merge-label {
+  margin: 4px 0 8px;
+  color: #2c3e50;
+}
+
+.btn-confirm-merge {
+  width: 100%;
+  padding: 10px;
+  background-color: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: bold;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: background 0.2s;
+}
+
+.btn-confirm-merge:hover {
+  background-color: #219a52;
+}
 </style>
