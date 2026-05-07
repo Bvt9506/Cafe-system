@@ -120,26 +120,61 @@ const fetchDashboardData = async () => {
       topItems.value = resTop.data.data.slice(0, 5); // top 5
     }
 
-    // 4. Lấy dữ liệu biểu đồ 7 ngày (Giả lập bằng API tháng)
-    const resMonthly = await api.get(`/api/reports/revenue/monthly/?thang=${currentMonth}&nam=${currentYear}`, { headers });
-    if (resMonthly.data.success) {
-      const data = resMonthly.data.data;
-      // Lấy 7 ngày cuối cùng có dữ liệu hoặc 7 ngày cuối tháng
-      const last7 = data.slice(-7);
-      
-      chartData.value = {
-        labels: last7.map(d => `Ngày ${d.day}`),
-        datasets: [
-          {
-            label: 'Doanh thu (VNĐ)',
-            backgroundColor: '#3498db',
-            borderColor: '#3498db',
-            data: last7.map(d => parseFloat(d.revenue))
-          }
-        ]
-      };
-      chartLoaded.value = true;
+    // 4. Lấy dữ liệu biểu đồ 7 ngày qua (đúng với lịch)
+    const last7DaysDates = [];
+    const todayDate = new Date();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(todayDate);
+      d.setDate(todayDate.getDate() - i);
+      last7DaysDates.push({
+        day: d.getDate(),
+        month: d.getMonth() + 1,
+        year: d.getFullYear(),
+        dateStr: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      });
     }
+
+    // Xác định các tháng cần lấy dữ liệu (tối đa 2 tháng)
+    const monthsToFetch = [];
+    last7DaysDates.forEach(d => {
+      if (!monthsToFetch.find(m => m.month === d.month && m.year === d.year)) {
+        monthsToFetch.push({ month: d.month, year: d.year });
+      }
+    });
+
+    const revenueDataMap = {};
+    for (const m of monthsToFetch) {
+      try {
+        const res = await api.get(`/api/reports/revenue/monthly/?thang=${m.month}&nam=${m.year}`, { headers });
+        if (res.data.success) {
+          res.data.data.forEach(item => {
+            revenueDataMap[item.date] = parseFloat(item.revenue);
+          });
+        }
+      } catch (e) {
+        console.error(`Lỗi lấy dữ liệu tháng ${m.month}/${m.year}`, e);
+      }
+    }
+
+    // Chuẩn bị dữ liệu cho biểu đồ
+    const last7 = last7DaysDates.map(d => ({
+      day: d.day,
+      date: d.dateStr,
+      revenue: revenueDataMap[d.dateStr] || 0
+    }));
+
+    chartData.value = {
+      labels: last7.map(d => `Ngày ${d.day}`),
+      datasets: [
+        {
+          label: 'Doanh thu (VNĐ)',
+          backgroundColor: '#3498db',
+          borderColor: '#3498db',
+          data: last7.map(d => d.revenue)
+        }
+      ]
+    };
+    chartLoaded.value = true;
 
   } catch (err) {
     console.error("Lỗi lấy dữ liệu Dashboard", err);
