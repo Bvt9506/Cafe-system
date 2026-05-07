@@ -18,7 +18,7 @@
         <tbody>
           <tr v-for="shift in shifts" :key="shift.ma_ca">
             <td><strong>{{ shift.ngay_lam }}</strong></td>
-            <td>{{ shift.ten_nhan_vien }}</td>
+            <td>{{ shift.nhan_vien_ten }}</td>
             <td>{{ shift.gio_bat_dau }}</td>
             <td>{{ shift.gio_ket_thuc }}</td>
           </tr>
